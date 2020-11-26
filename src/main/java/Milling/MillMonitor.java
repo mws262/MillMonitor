@@ -6,8 +6,8 @@ import org.apache.logging.log4j.*;
 import javax.swing.*;
 import javax.swing.border.BevelBorder;
 import java.awt.*;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +16,7 @@ public class MillMonitor extends JFrame {
     private final int BAUD = 9600;
     private final int ENDLINE_VAL = 10;
     private final int EXPECTED_INPUT_LEN = 16;
+    private final int PORT_TIMEOUT = 5000;
     private InputStream inputStream;
     private List<JLabel> labels = new ArrayList<>();
 
@@ -46,15 +47,58 @@ public class MillMonitor extends JFrame {
         SerialPort arduinoPort = null;
         while (arduinoPort == null) { // Keep looking until we find it.
             SerialPort[] serialPorts = SerialPort.getCommPorts();
+
+            // No longer relying on serial port names to identify. Too diverse between OS.
+            // Instead sending a message which should elicit a specific response from the correct device.
+            boolean deviceFound = false;
             for (SerialPort sp : serialPorts) {
-                System.out.println("Found: " + sp.getSystemPortName() + ", " + sp.getDescriptivePortName() + ", " + sp.getPortDescription());
-                if (sp.getPortDescription().contains("USB-Based Serial Port") || sp.getPortDescription().contains(
-                        "Arduino")) {
-                    if (arduinoPort == null) {
-                        arduinoPort = sp;
-                    } else {
-                        System.out.println("Multiple USB-serial ports found. May have identified the wrong one.");
+                System.out.println("Found: " + sp.getSystemPortName() + ", " + sp.getDescriptivePortName() + ", " + sp.getPortDescription() + ", Baud: " + sp.getBaudRate());
+
+                sp.openPort();
+                sp.setBaudRate(BAUD);
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                long timeoutStart = System.currentTimeMillis();
+
+                try (OutputStream os = sp.getOutputStream();
+                     InputStream inputStream = sp.getInputStream()){
+                    // Clear existing stuff on the stream.
+                    while (inputStream.available() > 0) {
+                        inputStream.read();
                     }
+                    // Write message over serial.
+                    os.write("handshake\n".getBytes());
+                    os.flush();
+
+                    // Wait for a reply.
+                    while (System.currentTimeMillis() - timeoutStart < PORT_TIMEOUT) {
+
+                        Thread.sleep(50);
+                        String response = "";
+                        byte[] in = new byte[100];
+                        while (inputStream.available() > 0) {
+                            inputStream.read(in);
+                            response = new String(in, StandardCharsets.UTF_8);
+                            System.out.println(response);
+                        }
+                        if (response.contains("HIGHFIVE")) {
+                            System.out.println("found the arduino");
+                            deviceFound = true;
+                            break;
+                        }
+                    }
+                } catch (IOException | InterruptedException e) {
+                    System.out.println("IOException caught and ignored.");
+                }
+
+                if (deviceFound) {
+                    arduinoPort = sp;
+                    break;
+                } else {
+                    sp.closePort();
                 }
             }
             // If not found, then wait and try again.
@@ -65,9 +109,6 @@ public class MillMonitor extends JFrame {
             }
         }
 
-        // Open the port when the correct one is found.
-        arduinoPort.openPort();
-        arduinoPort.setBaudRate(BAUD);
         inputStream = arduinoPort.getInputStream();
         try {
             Thread.sleep(10);
@@ -130,7 +171,7 @@ public class MillMonitor extends JFrame {
                             readValues.clear();
                         } else {
                             readValues.add(val);
-                            // System.out.print(val);
+                            System.out.print(val);
                         }
                     }
                 }
