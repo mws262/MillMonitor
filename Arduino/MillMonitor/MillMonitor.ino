@@ -6,7 +6,7 @@ const uint8_t pinset1[] = {39, 41, 43, 45, 47, 49, 51, 53};
 // Optocoupler set 2, outputs 1-8 wired to these ATMEGA pins.
 const uint8_t pinset2[] = {38, 40, 42, 44, 46, 48, 50, 52};
 
-const long SEND_SPACING_MS = 5000;
+const long SEND_SPACING_MS = 2000;
 
 String inputString = "";         // a String to hold incoming data
 
@@ -39,23 +39,27 @@ void loop() {
   routine is run between each time loop() runs, so using delay inside loop can
   delay response. Multiple bytes of data may be available.
 */
-void serialEvent() {
-  while (Serial.available()) {
-    // get the new byte:
-    char inChar = (char)Serial.read();
-    // add it to the inputString:
-    inputString += inChar;
-    // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
-    if (inChar == '\n') {
-        if (inputString.length() > 0) {
-          Serial.println("HIGHFIVE");
-          Serial.flush();
-          inputString = "";
-          digitalWrite(13, HIGH);
-          delay(500);
-        }
-        digitalWrite(13, LOW);
+void busyWait(int ms) {
+  long stTime = millis();
+  while (millis() - stTime < ms) {
+    while (Serial.available()) {
+      // get the new byte:
+      char inChar = (char)Serial.read();
+      // add it to the inputString:
+      inputString += inChar;
+      // if the incoming character is a newline, set a flag so the main loop can
+      // do something about it:
+      if (inChar == '\n') {
+          if (inputString.length() > 0) {
+            Serial.println("H");
+            Serial.flush();
+            inputString = "";
+            digitalWrite(13, HIGH);
+            delay(10);
+          }
+          digitalWrite(13, LOW);
+      }
+      delay(50);
     }
   }
 }

@@ -7,18 +7,19 @@ import javax.swing.*;
 import javax.swing.border.BevelBorder;
 import java.awt.*;
 import java.io.*;
-import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.*;
 
 public class MillMonitor extends JFrame {
 
     private final int BAUD = 9600;
     private final int ENDLINE_VAL = 10;
     private final int EXPECTED_INPUT_LEN = 16;
-    private final int PORT_TIMEOUT = 5000;
     private InputStream inputStream;
     private List<JLabel> labels = new ArrayList<>();
+    private SerialPort arduinoPort = null;
 
     private static final Logger logger = LogManager.getLogger(MillMonitor.class);
 
@@ -44,68 +45,91 @@ public class MillMonitor extends JFrame {
 
     public void findActiveSerial() {
         // Get the correct serial port.
-        SerialPort arduinoPort = null;
+        arduinoPort = null;
         while (arduinoPort == null) { // Keep looking until we find it.
             SerialPort[] serialPorts = SerialPort.getCommPorts();
 
             // No longer relying on serial port names to identify. Too diverse between OS.
             // Instead sending a message which should elicit a specific response from the correct device.
-            boolean deviceFound = false;
+            List<Integer> readVals = new ArrayList<>();
             for (SerialPort sp : serialPorts) {
                 System.out.println("Found: " + sp.getSystemPortName() + ", " + sp.getDescriptivePortName() + ", " + sp.getPortDescription() + ", Baud: " + sp.getBaudRate());
 
-                sp.openPort();
-                sp.setBaudRate(BAUD);
+                if (sp.getDescriptivePortName().toLowerCase().contains("bluetooth")) {
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    continue;
+                }
+
+                final Duration timeout = Duration.ofSeconds(4);
+                ExecutorService executor = Executors.newSingleThreadExecutor();
+
+                final Future<String> handler = executor.submit(() -> {
+
+                    sp.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
+//                    sp.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 1000, 1000);
+//                    sp.clearDTR();
+//                    sp.clearRTS();
+                    sp.setBaudRate(BAUD);
+                    sp.openPort();
+
+                    Thread.sleep(500);
+                    try {
+                        InputStream inputStream = sp.getInputStream();
+
+                        while (true) {
+                            Thread.sleep(50);
+
+                            while (inputStream.available() > 0) {
+                                int v = inputStream.read();
+                                if (v != ENDLINE_VAL) {
+                                    readVals.add(v);
+                                } else {
+                                    System.out.println(readVals.size());
+
+                                    boolean allInRange = readVals.stream().allMatch(s -> s == 0 || s == 1);
+                                    if (readVals.size() == 16 && allInRange) {
+                                        System.out.println("found the arduino");
+                                        return "found";
+                                    }
+                                    readVals.clear();
+                                }
+                            }
+                        }
+                    } catch (IOException | InterruptedException e) {
+                        System.out.println("IOException caught and ignored.");
+                    }
+                    return "unfound";
+                });
+
                 try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-                long timeoutStart = System.currentTimeMillis();
-
-                try (OutputStream os = sp.getOutputStream();
-                     InputStream inputStream = sp.getInputStream()){
-                    // Clear existing stuff on the stream.
-                    while (inputStream.available() > 0) {
-                        inputStream.read();
-                    }
-                    // Write message over serial.
-                    os.write("handshake\n".getBytes());
-                    os.flush();
-
-                    // Wait for a reply.
-                    while (System.currentTimeMillis() - timeoutStart < PORT_TIMEOUT) {
-
-                        Thread.sleep(50);
-                        String response = "";
-                        byte[] in = new byte[100];
-                        while (inputStream.available() > 0) {
-                            inputStream.read(in);
-                            response = new String(in, StandardCharsets.UTF_8);
-                            System.out.println(response);
-                        }
-                        if (response.contains("HIGHFIVE")) {
-                            System.out.println("found the arduino");
-                            deviceFound = true;
-                            break;
-                        }
-                    }
-                } catch (IOException | InterruptedException e) {
-                    System.out.println("IOException caught and ignored.");
+                    handler.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                } catch (TimeoutException | InterruptedException | ExecutionException e) {
+                    handler.cancel(true);
                 }
 
-                if (deviceFound) {
-                    arduinoPort = sp;
-                    break;
-                } else {
-                    sp.closePort();
+                executor.shutdownNow();
+                try {
+                    if (!handler.isCancelled() && handler.get().equals("found")) {
+                        arduinoPort = sp;
+                        InputStream in = arduinoPort.getInputStream();
+                        while (arduinoPort.bytesAvailable() > 0) {
+                            in.read();
+                        }
+                        break;
+                    } else {
+                        sp.closePort();
+                    }
+                } catch (InterruptedException | ExecutionException | IOException e) {
+                    System.out.println("ignoring an error when finishing looking at a specific port.");
                 }
             }
-            // If not found, then wait and try again.
             try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+                Thread.sleep(2000);
+            } catch (InterruptedException ignored) {
             }
         }
 
@@ -117,7 +141,7 @@ public class MillMonitor extends JFrame {
         }
     }
 
-    public void parseReceived(List<Integer> values) {
+    private void parseReceived(List<Integer> values) {
 
         StringBuilder sb = new StringBuilder();
         sb.append('\t');
@@ -153,7 +177,7 @@ public class MillMonitor extends JFrame {
         logger.info(sb.toString());
     }
 
-    public void listenToSerial() {
+    private void listenToSerial() {
         List<Integer> readValues = new ArrayList<>(24);
         while (true) {
             try {
@@ -178,13 +202,19 @@ public class MillMonitor extends JFrame {
             } catch (IOException e) {
                 // When a disconnection occurs, then go back to searching for it.
                 System.out.println("Port disconnected.");
+//                try {
+//                    inputStream.close();
+//                } catch (IOException ignored) {
+//                }
+
+                arduinoPort.closePort();
                 for (JLabel label : labels) {
                     label.setBackground(Color.BLACK);
                 }
                 findActiveSerial();
             }
             try {
-                Thread.sleep(500);
+                Thread.sleep(1000);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
