@@ -1,0 +1,89 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+  <meta http-equiv="refresh" content="30"/>
+  <meta http-equiv="Cache-control" content="no-cache">
+  <iframe id="frmFileNames" src="names.txt" onload="loadNames();" style="display: none;"></iframe>
+	<script>document.write("<iframe id='frmFile' src='status.txt?" + Date.now() +  "' onload='loadFile();' style='display: none;'></iframe>");</script>
+  <title>Mill monitor</title>
+
+  <script type="text/javascript">
+
+      function loadNames() {
+         var file, fr;
+
+        var oFrame = document.getElementById("frmFileNames");
+        var strRawContents = oFrame.contentWindow.document.body.childNodes[0].innerHTML;
+
+        var data = strRawContents.split('\n');
+        for (var i = 0; i < 8; i++) {
+          document.getElementById("m".concat(i + 1)).innerHTML = data[i];
+        }    
+      }
+
+      function loadFile() {
+        var file, fr;
+
+        var oFrame = document.getElementById("frmFile");
+        var strRawContents = oFrame.contentWindow.document.body.childNodes[0].innerHTML;
+
+        var data = strRawContents.split('\n');
+        for (var i = 0; i < 8; i++) {
+          document.getElementById("m".concat(i + 1)).style.backgroundColor =  getColor(data[i]);
+        }
+      }
+
+      function getColor(n) {
+
+        switch (n) {
+          case 'R':
+            return "red";
+          case "Y":
+            return "yellow";
+          case "G":
+            return "green";
+          default:
+            return "gray";
+        }
+      }
+
+    function destroyClickedElement(event) {
+      document.body.removeChild(event.target);
+    }
+  </script>
+
+  <style>
+  .grid-container {
+    display: grid;
+    grid-template-columns: auto;
+    background-color: #000000;
+    padding: 10px;
+    max-width: 200px;
+  }
+  .grid-item {
+    background-color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.8);
+    padding: 0px;
+    padding-top: 15px;
+    padding-bottom: 15px;
+    font-size: 30px;
+    text-align: center;
+  }
+  </style>
+</head>
+
+<body onload="loadFile()">
+  <div class="grid-container">
+  <div class="grid-item" id="m1">1</div>
+  <div class="grid-item" id="m2">2</div>
+  <div class="grid-item" id="m3">3</div>  
+  <div class="grid-item" id="m4">4</div>
+  <div class="grid-item" id="m5">5</div>
+  <div class="grid-item" id="m6">6</div>  
+  <div class="grid-item" id="m7">7</div>
+  <div class="grid-item" id="m8">8</div>
+</div>
+</body>
+</html>
